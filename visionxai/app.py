@@ -14,17 +14,14 @@ from surprise.model_selection import train_test_split
 bert_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def generate_bert_embeddings(texts):
-    """Generate BERT embeddings for a list of texts."""
     return np.array([bert_model.encode(text, convert_to_tensor=True).cpu().numpy() for text in texts])
 
 def train_word2vec(corpus):
-    """Train a Word2Vec model on the provided corpus."""
     tokenized_corpus = [text.split() for text in corpus]
     w2v_model = Word2Vec(tokenized_corpus, vector_size=100, window=5, min_count=1, workers=4)
     return w2v_model
 
 def preprocess_data(df):
-    """Generate embeddings for the dataset."""
     df['bert_embedding'] = list(generate_bert_embeddings(df['course_title']))
     
     w2v_model = train_word2vec(df['course_title'])
@@ -35,75 +32,117 @@ def preprocess_data(df):
     tfidf_vectorizer = TfidfVectorizer()
     tfidf_matrix = tfidf_vectorizer.fit_transform(df['course_title'])
     
-    # Reduce TF-IDF vector dimension to match BERT (384)
     svd = TruncatedSVD(n_components=384)
     tfidf_reduced = svd.fit_transform(tfidf_matrix)
     df['tfidf_vector'] = list(tfidf_reduced)
     
     return df, w2v_model, tfidf_vectorizer
 
-def train_collaborative_model(df):
-    """Train a collaborative filtering model using SVD."""
-    reader = Reader(rating_scale=(1, 5))
-    data = Dataset.load_from_df(df[['course_title', 'course_rating']], reader)
-    trainset, testset = train_test_split(data, test_size=0.2)
-    model = SVD()
-    model.fit(trainset)
-    return model
-
-def get_w2v_embedding(text, w2v_model):
-    """Generate Word2Vec embedding for user input."""
-    return np.mean([w2v_model.wv[word] for word in text.split() if word in w2v_model.wv] or [np.zeros(100)], axis=0)
-
 def recommend_courses(df, prev_education, future_goals, difficulty=None, cert_type=None, w2v_model=None):
-    """Recommend courses based on user input and course similarities."""
     user_embedding = bert_model.encode(prev_education + ' ' + future_goals, convert_to_tensor=True).cpu().numpy()
-    user_w2v_embedding = get_w2v_embedding(prev_education + ' ' + future_goals, w2v_model)
+    user_w2v_embedding = np.mean(
+        [w2v_model.wv[word] for word in (prev_education + ' ' + future_goals).split() if word in w2v_model.wv] or [np.zeros(100)], axis=0
+    )
     
-    # Compute similarities
     bert_similarities = np.array([1 - cosine(user_embedding, emb) for emb in df['bert_embedding']])
     w2v_similarities = np.array([1 - cosine(user_w2v_embedding, emb) for emb in df['w2v_embedding']])
     tfidf_similarities = np.array([1 - cosine(user_embedding, emb) for emb in df['tfidf_vector']])
     
-    # Final score (weighted combination)
     final_scores = (0.5 * tfidf_similarities) + (0.3 * bert_similarities) + (0.2 * w2v_similarities)
     df['score'] = final_scores
     
-    # Filtering
     if difficulty and difficulty != "All":
         df = df[df['course_difficulty'] == difficulty]
     if cert_type and cert_type != "All":
         df = df[df['course_Certificate_type'] == cert_type]
     
-    # Sort and return top results
     top_courses = df.sort_values(by='score', ascending=False).head(5)
     return top_courses.to_dict(orient='records')
 
-# Streamlit UI
-st.title("🎓 AI-Powered Course Recommender")
+# Sci-Fi UI Design
+st.markdown(
+    """
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background: url("https://mir-s3-cdn-cf.behance.net/project_modules/hd/33480837562161.57449903490a3.gif") center/cover no-repeat fixed;
+            color: #00FF41;
+            animation: fadeIn 2s ease-in-out;
+        }
+        .title {
+            text-align: center;
+            font-size: 3rem;
+            font-weight: bold;
+            padding: 20px;
+            background: linear-gradient(90deg, #0ff, #00ff41);
+            -webkit-background-clip: text;
+            color: transparent;
+            text-shadow: 0px 0px 10px #0ff;
+        }
+        .course-card {
+            background: rgba(0, 255, 65, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 15px #0ff;
+            margin-bottom: 15px;
+        }
+        .course-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0px 0px 20px #0ff;
+        }
+        .btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: #0ff;
+            color: black;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            background: #00ff41;
+            color: black;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+st.markdown('<div class="title">🚀 AI-Powered Course Recommender</div>', unsafe_allow_html=True)
 
 df = pd.read_csv("coursea_data.csv")
 df, w2v_model, _ = preprocess_data(df)
 
-st.sidebar.header("🎯 Filters")
+st.sidebar.header("🛸 Filters")
+difficulty = st.sidebar.selectbox("🧪 Difficulty", ["All"] + list(df['course_difficulty'].dropna().unique()))
+cert_type = st.sidebar.selectbox("📜 Certificate Type", ["All"] + list(df['course_Certificate_type'].dropna().unique()))
 
-difficulty_options = ["All"] + list(df['course_difficulty'].dropna().unique())
-cert_type_options = ["All"] + list(df['course_Certificate_type'].dropna().unique())
+prev_education = st.text_area("🧠 Enter Your Education")
+future_goals = st.text_area("🌌 Your Future Goals")
 
-difficulty = st.sidebar.selectbox("📌 Difficulty", difficulty_options)
-cert_type = st.sidebar.selectbox("📜 Certificate Type", cert_type_options)
-
-prev_education = st.text_area("📚 Your Previous Education")
-future_goals = st.text_area("🚀 Your Future Goals")
-
-if st.button("🔍 Get Recommendations"):
+if st.button("⚡ Get Recommendations"):
     if prev_education and future_goals:
         recommendations = recommend_courses(df, prev_education, future_goals, difficulty, cert_type, w2v_model)
         if recommendations:
-            st.subheader("🔥 Recommended Courses")
+            st.subheader("🌟 Recommended Courses")
             for idx, course in enumerate(recommendations):
-                st.write(f"{idx+1}. {course['course_title']} - {course['course_organization']}")
+                st.markdown(f"""
+                    <div class="course-card">
+                        <h4>{idx+1}. {course['course_title']}</h4>
+                        <p>🏫 <b>Organization:</b> {course['course_organization']}</p>
+                        <p>📜 <b>Certificate Type:</b> {course['course_Certificate_type']}</p>
+                        <p>🎯 <b>Difficulty:</b> {course['course_difficulty']}</p>
+                        <p>⭐ <b>Rating:</b> {course['course_rating']} | 👨‍🎓 <b>Enrolled:</b> {course['course_students_enrolled']}</p>
+                        <a href="{course.get('course_url', '#')}" class="btn" target="_blank">Access Course</a>
+                    </div>
+                """, unsafe_allow_html=True)
         else:
-            st.warning("⚠️ No courses match your criteria. Try different filters.")
+            st.warning("🚨 No matching courses. Try different filters!")
     else:
-        st.warning("⚠️ Please enter both previous education and future goals.")
+        st.warning("🚨 Please enter both previous education and future goals!")
