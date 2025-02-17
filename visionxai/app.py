@@ -93,17 +93,28 @@ st.markdown(
             font-size: 3rem;
             font-weight: bold;
             padding: 20px;
-            background: linear-gradient(90deg, #0ff, #00ff41);
-            -webkit-background-clip: text;
-            color: transparent;
             text-shadow: 0px 0px 10px #0ff;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background: #ff00ff;
+            color: #000;
+            font-size: 1.2rem;
+            text-align: center;
+            border-radius: 10px;
+            transition: 0.3s;
+        }
+        .btn:hover {
+            background: #00ffff;
         }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="title">🚀 AI-Powered Course Recommender</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">💾 AI-Powered Course Recommender 🚀</div>', unsafe_allow_html=True)
 
 st.sidebar.header("🛸 Filters")
 difficulty = st.sidebar.selectbox("🧪 Difficulty", ["All"] + list(df['course_difficulty'].dropna().unique()))
@@ -119,7 +130,7 @@ if st.button("⚡ Get Recommendations"):
             st.subheader("🌟 Recommended Courses")
             for idx, course in enumerate(recommendations):
                 st.markdown(f"""
-                    <div class="course-card">
+                    <div>
                         <h4>{idx+1}. {course['course_title']}</h4>
                         <p>🏫 <b>Organization:</b> {course['course_organization']}</p>
                         <p>📜 <b>Certificate Type:</b> {course['course_Certificate_type']}</p>

@@ -8,6 +8,7 @@ from sklearn.decomposition import TruncatedSVD
 from scipy.spatial.distance import cosine
 from surprise import SVD, Dataset, Reader
 from surprise.model_selection import train_test_split
+from sklearn.cluster import KMeans
 import re
 
 # Load BERT model
@@ -31,6 +32,12 @@ def train_word2vec(corpus):
     w2v_model = Word2Vec(tokenized_corpus, vector_size=100, window=5, min_count=1, workers=4)
     return w2v_model
 
+def cluster_courses(embeddings, n_clusters=5):
+    """Cluster courses based on embeddings."""
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(embeddings)
+    return clusters
+
 def preprocess_data(df):
     """Generate embeddings for the dataset."""
     df.dropna(subset=['course_title', 'course_difficulty', 'course_rating'], inplace=True)
@@ -49,6 +56,8 @@ def preprocess_data(df):
     tfidf_reduced = svd.fit_transform(tfidf_matrix)
     df['tfidf_vector'] = list(tfidf_reduced)
     
+    df['cluster'] = cluster_courses(tfidf_reduced)
+    
     return df, w2v_model, tfidf_vectorizer
 
 def recommend_courses(df, prev_education, future_goals, difficulty=None, cert_type=None):
@@ -56,24 +65,23 @@ def recommend_courses(df, prev_education, future_goals, difficulty=None, cert_ty
     user_text = clean_text(prev_education + ' ' + future_goals)
     user_embedding = bert_model.encode(user_text, convert_to_tensor=True).cpu().numpy()
     
-    w2v_model = train_word2vec(df['clean_title'])
-    user_w2v_embedding = np.mean(
-        [w2v_model.wv[word] for word in user_text.split() if word in w2v_model.wv] or [np.zeros(100)], axis=0
-    )
-    
+    # Find the most relevant cluster
     tfidf_vectorizer = TfidfVectorizer()
     tfidf_matrix = tfidf_vectorizer.fit_transform(df['clean_title'])
     svd = TruncatedSVD(n_components=100)
     tfidf_reduced = svd.fit_transform(tfidf_matrix)
     user_tfidf_embedding = svd.transform(tfidf_vectorizer.transform([user_text]))[0]
     
+    df['relevancy_score'] = [1 - cosine(user_tfidf_embedding, emb) for emb in df['tfidf_vector']]
+    user_cluster = cluster_courses([user_tfidf_embedding], n_clusters=df['cluster'].nunique())[0]
+    df = df[df['cluster'] == user_cluster]
+    
     # Compute similarities
     bert_similarities = np.array([1 - cosine(user_embedding, emb) for emb in df['bert_embedding']])
-    w2v_similarities = np.array([1 - cosine(user_w2v_embedding, emb) for emb in df['w2v_embedding']])
     tfidf_similarities = np.array([1 - cosine(user_tfidf_embedding, emb) for emb in df['tfidf_vector']])
     
     # Final score (weighted combination)
-    final_scores = (0.4 * tfidf_similarities) + (0.4 * bert_similarities) + (0.2 * w2v_similarities)
+    final_scores = (0.4 * tfidf_similarities) + (0.4 * bert_similarities) + (0.2 * df['relevancy_score'])
     df['score'] = final_scores
     
     # Filtering
