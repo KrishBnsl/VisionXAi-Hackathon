@@ -7,8 +7,6 @@ from sklearn.decomposition import TruncatedSVD
 from sentence_transformers import SentenceTransformer
 from gensim.models import Word2Vec
 from scipy.spatial.distance import cosine
-from surprise import SVD, Dataset, Reader
-from surprise.model_selection import train_test_split
 
 # Load BERT model
 bert_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -17,20 +15,20 @@ def generate_bert_embeddings(texts):
     return np.array([bert_model.encode(text, convert_to_tensor=True).cpu().numpy() for text in texts])
 
 def train_word2vec(corpus):
-    tokenized_corpus = [text.split() for text in corpus]
+    tokenized_corpus = [str(text).split() for text in corpus]
     w2v_model = Word2Vec(tokenized_corpus, vector_size=100, window=5, min_count=1, workers=4)
     return w2v_model
 
 def preprocess_data(df):
-    df['bert_embedding'] = list(generate_bert_embeddings(df['course_title']))
+    df['bert_embedding'] = list(generate_bert_embeddings(df['course_title'].astype(str)))
     
-    w2v_model = train_word2vec(df['course_title'])
+    w2v_model = train_word2vec(df['course_title'].astype(str))
     df['w2v_embedding'] = df['course_title'].apply(
-        lambda x: np.mean([w2v_model.wv[word] for word in x.split() if word in w2v_model.wv] or [np.zeros(100)], axis=0)
+        lambda x: np.mean([w2v_model.wv[word] for word in str(x).split() if word in w2v_model.wv] or [np.zeros(100)], axis=0)
     )
     
     tfidf_vectorizer = TfidfVectorizer()
-    tfidf_matrix = tfidf_vectorizer.fit_transform(df['course_title'])
+    tfidf_matrix = tfidf_vectorizer.fit_transform(df['course_title'].astype(str))
     
     svd = TruncatedSVD(n_components=384)
     tfidf_reduced = svd.fit_transform(tfidf_matrix)
@@ -59,6 +57,23 @@ def recommend_courses(df, prev_education, future_goals, difficulty=None, cert_ty
     top_courses = df.sort_values(by='score', ascending=False).head(5)
     return top_courses.to_dict(orient='records')
 
+# Load and preprocess data
+df = pd.read_csv("coursera-data.csv")
+
+df.rename(columns={
+    'Name': 'course_title',
+    'Url': 'course_url',
+    'Rating': 'course_rating',
+    'Difficulty': 'course_difficulty'
+}, inplace=True)
+
+df['course_rating'] = pd.to_numeric(df['course_rating'], errors='coerce')
+df['course_organization'] = "Unknown"
+df['course_Certificate_type'] = "Unknown"
+df['course_students_enrolled'] = 0
+
+df, w2v_model, _ = preprocess_data(df)
+
 # Sci-Fi UI Design
 st.markdown(
     """
@@ -83,41 +98,12 @@ st.markdown(
             color: transparent;
             text-shadow: 0px 0px 10px #0ff;
         }
-        .course-card {
-            background: rgba(0, 255, 65, 0.1);
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0px 0px 15px #0ff;
-            margin-bottom: 15px;
-        }
-        .course-card:hover {
-            transform: scale(1.05);
-            box-shadow: 0px 0px 20px #0ff;
-        }
-        .btn {
-            display: inline-block;
-            padding: 8px 15px;
-            background: #0ff;
-            color: black;
-            border-radius: 5px;
-            text-decoration: none;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-        .btn:hover {
-            background: #00ff41;
-            color: black;
-        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
 st.markdown('<div class="title">🚀 AI-Powered Course Recommender</div>', unsafe_allow_html=True)
-
-df = pd.read_csv("coursea_data.csv")
-df, w2v_model, _ = preprocess_data(df)
 
 st.sidebar.header("🛸 Filters")
 difficulty = st.sidebar.selectbox("🧪 Difficulty", ["All"] + list(df['course_difficulty'].dropna().unique()))
@@ -139,7 +125,7 @@ if st.button("⚡ Get Recommendations"):
                         <p>📜 <b>Certificate Type:</b> {course['course_Certificate_type']}</p>
                         <p>🎯 <b>Difficulty:</b> {course['course_difficulty']}</p>
                         <p>⭐ <b>Rating:</b> {course['course_rating']} | 👨‍🎓 <b>Enrolled:</b> {course['course_students_enrolled']}</p>
-                        <a href="{course.get('course_url', '#')}" class="btn" target="_blank">Access Course</a>
+                        <a href="{course['course_url']}" class="btn" target="_blank">Access Course</a>
                     </div>
                 """, unsafe_allow_html=True)
         else:
